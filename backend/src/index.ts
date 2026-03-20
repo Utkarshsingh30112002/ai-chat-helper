@@ -18,7 +18,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
 /** If set, Gemini is used instead of OpenAI for /v1/suggest. */
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim() ?? "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+/** Default avoids some free-tier quota edge cases on 2.0; override with e.g. gemini-2.0-flash. */
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-1.5-flash";
 
 const useGemini = GEMINI_API_KEY.length > 0;
 
@@ -107,6 +108,17 @@ app.get("/health", async () => ({
     rateLimit: { maxPerIp: RATE_LIMIT_MAX, window: RATE_LIMIT_WINDOW },
   },
 }));
+
+/** OpenAI / Google Generative AI SDK errors often expose numeric `status` (e.g. 429 quota). */
+function upstreamHttpStatus(err: unknown): number | undefined {
+  if (err && typeof err === "object" && "status" in err) {
+    const s = (err as { status?: unknown }).status;
+    if (typeof s === "number" && Number.isFinite(s)) {
+      return s;
+    }
+  }
+  return undefined;
+}
 
 type ClientLogBody = {
   level?: string;
@@ -407,14 +419,22 @@ app.post<{ Body: SuggestBody }>("/v1/suggest", async (request, reply) => {
   } catch (err) {
     stats.suggestOpenAiErrors++;
     app.log.error({ err }, "POST /v1/suggest model error");
+    const detail = err instanceof Error ? err.message : String(err);
+    const status = upstreamHttpStatus(err);
     await appendAgentFailureLog(
       {
         received,
         kind: "upstream",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: status != null ? `[http ${status}] ${detail}` : detail,
       },
       (obj, msg) => app.log.warn(obj, msg)
     );
+    if (status === 429) {
+      return reply.status(429).send({
+        error:
+          "Model provider rate limit or quota exceeded (429). Wait a minute and retry, enable billing, or set GEMINI_MODEL to another model (e.g. gemini-1.5-flash).",
+      });
+    }
     return reply.status(502).send({ error: "Upstream model request failed" });
   }
 });

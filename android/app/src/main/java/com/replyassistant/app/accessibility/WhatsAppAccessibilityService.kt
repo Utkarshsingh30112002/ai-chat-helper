@@ -76,20 +76,21 @@ class WhatsAppAccessibilityService : AccessibilityService() {
      */
     fun requestSuggestionsFromCurrentChat() {
         mainHandler.post {
-            val rootCheck = rootInActiveWindow ?: return@post
+            val root = rootInActiveWindow ?: return@post
             try {
-                if (findComposeField(rootCheck) == null) {
+                val compose = findComposeField(root)
+                if (compose == null) {
                     Toast.makeText(this, R.string.toast_open_chat_first, Toast.LENGTH_SHORT).show()
                     return@post
                 }
-            } finally {
-                rootCheck.recycle()
-            }
+                val composeRect = Rect()
+                compose.getBoundsInScreen(composeRect)
+                val composeTopY = composeRect.top
+                compose.recycle()
 
-            val root = rootInActiveWindow ?: return@post
-            try {
                 val sb = StringBuilder()
-                collectVisibleText(root, sb, 0)
+                collectChatVisibleText(root, composeTopY, sb)
+
                 val raw = sb.toString().trim()
                 val filtered = filterChatContext(raw)
                 if (looksLikeChatList(filtered)) {
@@ -133,10 +134,24 @@ class WhatsAppAccessibilityService : AccessibilityService() {
             .filter { line ->
                 line.isNotEmpty() &&
                     !line.contains("Suggested replies", ignoreCase = true) &&
-                    line != "Close"
+                    line != "Close" &&
+                    !isLikelyUiChromeLine(line)
             }
             .joinToString("\n")
             .trim()
+    }
+
+    private fun isLikelyUiChromeLine(line: String): Boolean {
+        val t = line.trim()
+        if (t.length <= 2) return false
+        val lower = t.lowercase()
+        if (lower in UI_CHROME_EXACT_EN) return true
+        if (t in UI_CHROME_EXACT_EN) return true
+        if (t in UI_CHROME_EXACT_HI) return true
+        if (lower.contains("double tap") && (lower.contains("record") || lower.contains("hold"))) return true
+        if (lower.contains("slide left to cancel")) return true
+        if (lower.contains("voice message") && lower.contains("button") && t.length > 35) return true
+        return false
     }
 
     private fun looksLikeChatList(text: String): Boolean {
@@ -145,6 +160,107 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         return l.contains("chats") &&
             l.contains("updates") &&
             (l.contains("communities") || l.contains("\nstatus\n") || l.contains(" recent updates"))
+    }
+
+    /**
+     * Prefer the conversation RecyclerView / list region above the composer; if too little text,
+     * fall back to a vertical band (excludes top toolbar + bottom composer chrome).
+     */
+    private fun collectChatVisibleText(root: AccessibilityNodeInfo, composeTopY: Int, sb: StringBuilder) {
+        val scoped = findMessageListRoot(root, composeTopY)
+        if (scoped != null) {
+            try {
+                collectVisibleText(scoped, sb, 0)
+            } finally {
+                scoped.recycle()
+            }
+        }
+        if (sb.length < MIN_SCOPED_CHARS) {
+            sb.clear()
+            val topMinCenterY = dp(140f).coerceAtLeast(0).coerceAtMost(composeTopY - 1)
+            if (composeTopY > topMinCenterY) {
+                collectVisibleTextInVerticalBand(root, sb, 0, composeTopY, topMinCenterY)
+            } else {
+                collectVisibleText(root, sb, 0)
+            }
+        }
+    }
+
+    private fun dp(dp: Float): Int = (dp * resources.displayMetrics.density).toInt()
+
+    /** Largest RecyclerView sitting above the compose bar (typical message list on WA 2.26+). */
+    private fun findRecyclerAboveCompose(root: AccessibilityNodeInfo, composeTopY: Int): AccessibilityNodeInfo? {
+        val minHeight = dp(120f)
+        val slop = dp(8f)
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        fun walk(n: AccessibilityNodeInfo) {
+            val cls = n.className?.toString().orEmpty()
+            if (cls.contains("RecyclerView", ignoreCase = true)) {
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                if (r.height() >= minHeight && r.bottom <= composeTopY + slop) {
+                    candidates.add(AccessibilityNodeInfo.obtain(n))
+                }
+            }
+            for (i in 0 until n.childCount) {
+                val child = n.getChild(i) ?: continue
+                try {
+                    walk(child)
+                } finally {
+                    child.recycle()
+                }
+            }
+        }
+        walk(root)
+        val best = candidates.maxByOrNull {
+            val r = Rect()
+            it.getBoundsInScreen(r)
+            r.width().toLong() * r.height()
+        }
+        candidates.filter { it != best }.forEach { it.recycle() }
+        return best
+    }
+
+    /** Fallback: id hints seen on some WhatsApp builds (package-specific ids). */
+    private fun findConversationLikeContainer(root: AccessibilityNodeInfo, composeTopY: Int): AccessibilityNodeInfo? {
+        val minHeight = dp(100f)
+        val slop = dp(8f)
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        fun walk(n: AccessibilityNodeInfo) {
+            val vid = n.viewIdResourceName ?: ""
+            val idMatch =
+                (vid.contains("conversation") && (vid.contains("list") || vid.contains("messages"))) ||
+                    vid.contains("messages_list") ||
+                    vid.contains("message_list")
+            if (idMatch) {
+                val r = Rect()
+                n.getBoundsInScreen(r)
+                if (r.height() >= minHeight && r.bottom <= composeTopY + slop) {
+                    candidates.add(AccessibilityNodeInfo.obtain(n))
+                }
+            }
+            for (i in 0 until n.childCount) {
+                val child = n.getChild(i) ?: continue
+                try {
+                    walk(child)
+                } finally {
+                    child.recycle()
+                }
+            }
+        }
+        walk(root)
+        val best = candidates.maxByOrNull {
+            val r = Rect()
+            it.getBoundsInScreen(r)
+            r.height()
+        }
+        candidates.filter { it != best }.forEach { it.recycle() }
+        return best
+    }
+
+    private fun findMessageListRoot(root: AccessibilityNodeInfo, composeTopY: Int): AccessibilityNodeInfo? {
+        findRecyclerAboveCompose(root, composeTopY)?.let { return it }
+        return findConversationLikeContainer(root, composeTopY)
     }
 
     private fun collectVisibleText(node: AccessibilityNodeInfo, sb: StringBuilder, depth: Int) {
@@ -157,6 +273,33 @@ class WhatsAppAccessibilityService : AccessibilityService() {
             val child = node.getChild(i) ?: continue
             try {
                 collectVisibleText(child, sb, depth + 1)
+            } finally {
+                child.recycle()
+            }
+        }
+    }
+
+    private fun collectVisibleTextInVerticalBand(
+        node: AccessibilityNodeInfo,
+        sb: StringBuilder,
+        depth: Int,
+        composeTopY: Int,
+        topMinCenterY: Int
+    ) {
+        if (depth > 120) return
+        if (node.packageName?.toString() == BuildConfig.APPLICATION_ID) return
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        val cy = r.centerY()
+        val inBand = cy >= topMinCenterY && cy < composeTopY
+        if (inBand) {
+            node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { sb.appendLine(it) }
+            node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { sb.appendLine(it) }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            try {
+                collectVisibleTextInVerticalBand(child, sb, depth + 1, composeTopY, topMinCenterY)
             } finally {
                 child.recycle()
             }
@@ -211,6 +354,32 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         private const val WHATSAPP = "com.whatsapp"
         private const val WHATSAPP_BUSINESS = "com.whatsapp.w4b"
         private const val MAX_CONTEXT_CHARS = 8000
+        /** If scoped RecyclerView capture yields less than this, use vertical-band fallback. */
+        private const val MIN_SCOPED_CHARS = 35
+
+        private val UI_CHROME_EXACT_EN = setOf(
+            "back",
+            "close",
+            "read",
+            "today",
+            "forward to…",
+            "forward to...",
+            "more options",
+            "message",
+            "attach",
+            "camera",
+            "message yourself",
+            "emoji, gifs and stickers",
+        )
+
+        /** Short Devanagari labels that are usually toolbar / composer (not normal chat). */
+        private val UI_CHROME_EXACT_HI = setOf(
+            "संदेश",
+            "अटैच",
+            "कैमरा",
+            "आगे भेजें…",
+            "आगे भेजें...",
+        )
 
         fun copyToClipboard(context: Context, text: String) {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
