@@ -8,6 +8,8 @@ Personal Android assistant that:
 
 ## Layout
 
+This project uses a **single Git repository** at the repo root (no nested `android/` Git repo).
+
 | Folder | Description |
 |--------|-------------|
 | [`backend/`](backend/) | Fastify API: `POST /v1/suggest`, bearer auth, OpenAI-compatible client |
