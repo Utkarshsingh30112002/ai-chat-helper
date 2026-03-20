@@ -198,6 +198,7 @@ function buildSystemPrompt(locale: string, tone: string, mode: SuggestMode): str
 Rules:
 - Exactly 3 strings in "suggestions".
 - Each reply is concise and natural for the conversation.
+- The user may paste a two-sided transcript. Messages from the user may be marked (e.g. a line "You" before their bubbles, or similar). Other lines are from the contact. Suggest only replies the user would send next — not as the contact.
 - Tone: ${tone}.
 - Locale / language for replies: ${locale}.
 - ${modeLine[mode]}
@@ -250,8 +251,8 @@ app.post<{ Body: SuggestBody }>("/v1/suggest", async (request, reply) => {
   const system = buildSystemPrompt(locale, tone, mode);
 
   const userParts = [
-    sender ? `Sender/handle (if known): ${sender}` : null,
-    `Incoming message to respond to:\n${message}`,
+    sender ? `Contact / chat title (if known): ${sender}` : null,
+    `Conversation context (may include both sides; suggest replies only for the user to send):\n${message}`,
   ].filter(Boolean);
   const userContent = userParts.join("\n\n");
 

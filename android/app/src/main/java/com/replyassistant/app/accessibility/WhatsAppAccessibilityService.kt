@@ -78,6 +78,8 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         mainHandler.post {
             val root = rootInActiveWindow ?: return@post
             try {
+                val contactName = extractChatTitle(root)
+
                 val compose = findComposeField(root)
                 if (compose == null) {
                     Toast.makeText(this, R.string.toast_open_chat_first, Toast.LENGTH_SHORT).show()
@@ -103,9 +105,11 @@ class WhatsAppAccessibilityService : AccessibilityService() {
                     return@post
                 }
 
+                val payload = wrapTranscriptForModel(clipped, contactName)
+
                 OverlayPresenter.removeSuggestionPanel()
                 ReplyAssistantApp.instance.applicationScope.launch(Dispatchers.IO) {
-                    val result = suggestRepo.suggest(clipped, sender = null)
+                    val result = suggestRepo.suggest(payload, sender = contactName)
                     result.onSuccess { list ->
                         if (list.size == 3) {
                             mainHandler.post {
@@ -126,6 +130,58 @@ class WhatsAppAccessibilityService : AccessibilityService() {
                 root.recycle()
             }
         }
+    }
+
+    /**
+     * Best-effort chat title from the top toolbar (above the message list). Used as `sender` and
+     * to label who "the other person" is in the wrapped transcript.
+     */
+    private fun extractChatTitle(root: AccessibilityNodeInfo): String? {
+        val maxY = (resources.displayMetrics.heightPixels * 0.16f).toInt().coerceAtLeast(40)
+        val candidates = mutableListOf<String>()
+        fun walk(n: AccessibilityNodeInfo) {
+            val t = n.text?.toString()?.trim() ?: return
+            if (t.isEmpty() || t.length > 52) return
+            if (TIME_LINE_PATTERN.matches(t)) return
+            val r = Rect()
+            n.getBoundsInScreen(r)
+            if (r.centerY() >= maxY) return
+            val tl = t.lowercase()
+            if (tl in TITLE_BLOCKLIST) return
+            candidates.add(t)
+            for (i in 0 until n.childCount) {
+                val c = n.getChild(i) ?: continue
+                try {
+                    walk(c)
+                } finally {
+                    c.recycle()
+                }
+            }
+        }
+        walk(root)
+        return candidates
+            .distinct()
+            .filter { it.length >= 2 }
+            .maxByOrNull { it.length }
+    }
+
+    /**
+     * Explains two-sided transcript + passes contact name so the model suggests **user** replies only.
+     */
+    private fun wrapTranscriptForModel(transcript: String, contactName: String?): String {
+        val other = contactName?.trim()?.takeIf { it.isNotEmpty() } ?: "the other person"
+        val header = buildString {
+            appendLine("You are helping the user write their next WhatsApp reply.")
+            appendLine("Chat with: $other")
+            appendLine(
+                "The transcript may include both sides. The user's own messages may appear as a line \"You\" " +
+                    "before their bubbles (or similar). Other lines are from $other."
+            )
+            appendLine()
+            appendLine("--- Transcript ---")
+        }
+        val budget = (MAX_CONTEXT_CHARS - header.length).coerceAtLeast(0)
+        return header + transcript.take(budget)
     }
 
     private fun filterChatContext(raw: String): String {
@@ -356,6 +412,35 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         private const val MAX_CONTEXT_CHARS = 8000
         /** If scoped RecyclerView capture yields less than this, use vertical-band fallback. */
         private const val MIN_SCOPED_CHARS = 35
+
+        private val TIME_LINE_PATTERN = Regex("^\\d{1,2}:\\d{2}$")
+
+        /** Toolbar / tab labels — not chat titles (lowercase match). */
+        private val TITLE_BLOCKLIST = setOf(
+            "back",
+            "search",
+            "chats",
+            "calls",
+            "status",
+            "camera",
+            "settings",
+            "more",
+            "archived",
+            "starred",
+            "select",
+            "voice call",
+            "video call",
+            "whatsapp",
+            "view contact",
+            "mute",
+            "block",
+            "online",
+            "typing",
+            "typing…",
+            "typing...",
+            "forward to…",
+            "forward to...",
+        )
 
         private val UI_CHROME_EXACT_EN = setOf(
             "back",
