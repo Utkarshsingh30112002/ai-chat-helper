@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Reply Assistant</string>
+    <string name="notification_listener_label">Reply Assistant (notifications)</string>
+    <string name="accessibility_service_label">Reply Assistant (WhatsApp)</string>
+    <string name="accessibility_description">Shows a small purple button while WhatsApp is open. Tap it in a chat to get AI reply suggestions at the top of the screen. Can fill the message field when you pick a suggestion. Does not read other apps unless you leave WhatsApp (used to hide the button).</string>
+    <string name="overlay_channel_name">Suggestions</string>
+    <string name="overlay_notification_title">Reply suggestions</string>
+    <string name="clipboard_fallback_toast">Copied — open WhatsApp and paste in the message box</string>
+    <string name="inject_failed_toast">Could not fill the field — copied to clipboard instead</string>
+    <string name="fab_content_description">Get reply suggestions</string>
+    <string name="toast_open_chat_first">Open a WhatsApp chat first</string>
+    <string name="toast_no_text_captured">No chat text found — scroll the conversation or try again</string>
+    <string name="toast_chat_list_open">Open a conversation (not the chat list)</string>
+</resources>

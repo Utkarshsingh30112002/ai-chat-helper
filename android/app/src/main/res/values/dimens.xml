@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="reply_fab_size">52dp</dimen>
+    <dimen name="reply_panel_top_margin">56dp</dimen>
+    <dimen name="reply_fab_bottom_offset">120dp</dimen>
+</resources>

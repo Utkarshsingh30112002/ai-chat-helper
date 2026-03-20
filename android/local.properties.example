@@ -1,0 +1,13 @@
+# Copy to local.properties (gitignored). Set sdk.dir to your Android SDK root.
+
+# Android Studio default (macOS):
+# sdk.dir=/Users/YOUR_USER/Library/Android/sdk
+
+# Homebrew android-commandlinetools (after: brew install --cask android-commandlinetools):
+# sdk.dir=/opt/homebrew/share/android-commandlinetools
+# (Intel Mac: /usr/local/share/android-commandlinetools)
+
+# Windows (escape backslashes):
+# sdk.dir=C\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
+
+sdk.dir=/path/to/Android/sdk
