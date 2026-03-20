@@ -47,16 +47,26 @@ class WhatsAppAccessibilityService : AccessibilityService() {
             FloatingIconManager.hide()
             return
         }
-        val pkg = event?.packageName?.toString() ?: return
-        if (pkg == BuildConfig.APPLICATION_ID) return
+        if (event?.packageName?.toString() == BuildConfig.APPLICATION_ID) return
 
-        when (pkg) {
-            WHATSAPP, WHATSAPP_BUSINESS -> {
+        // Use the active window's package, not event.packageName — IME/WebView/sub-windows often
+        // report a different package while WhatsApp is still open, which was hiding the FAB constantly.
+        val rootPkg = rootInActiveWindow?.packageName?.toString()
+        val eventPkg = event?.packageName?.toString()
+
+        when {
+            isWhatsApp(rootPkg) || (rootPkg == null && isWhatsApp(eventPkg)) -> {
                 FloatingIconManager.showIfNeeded(this) { requestSuggestionsFromCurrentChat() }
             }
-            else -> FloatingIconManager.hide()
+            rootPkg != null && !isWhatsApp(rootPkg) -> {
+                FloatingIconManager.hide()
+            }
+            // rootPkg == null and event not WA: leave FAB as-is (transient null → no flicker)
         }
     }
+
+    private fun isWhatsApp(pkg: String?): Boolean =
+        pkg == WHATSAPP || pkg == WHATSAPP_BUSINESS
 
     override fun onInterrupt() {}
 
