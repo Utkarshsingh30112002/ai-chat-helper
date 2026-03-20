@@ -46,6 +46,39 @@
                 android:inputType="textPassword" />
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:paddingBottom="8dp"
+            android:text="@string/reply_style_title"
+            android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+        <RadioGroup
+            android:id="@+id/radioReplyMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                android:id="@+id/radioModeStandard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/reply_mode_standard" />
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                android:id="@+id/radioModeBrief"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/reply_mode_brief" />
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                android:id="@+id/radioModeProfessional"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/reply_mode_professional" />
+        </RadioGroup>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonSave"
             android:layout_width="match_parent"

@@ -6,7 +6,9 @@ data class SuggestRequest(
     val message: String,
     val sender: String? = null,
     val locale: String? = "en",
-    val tone: String? = "neutral"
+    val tone: String? = "neutral",
+    /** System prompt variant; see [com.replyassistant.app.settings.ReplyMode]. */
+    val mode: String? = "standard"
 )
 
 data class SuggestResponse(

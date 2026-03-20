@@ -69,7 +69,8 @@ class SuggestRepository(context: Context) {
                 message = message.take(16_000),
                 sender = sender,
                 locale = "en",
-                tone = "neutral"
+                tone = "neutral",
+                mode = settings.replyMode
             )
             val resp = api!!.suggest(body)
             val list = resp.suggestions

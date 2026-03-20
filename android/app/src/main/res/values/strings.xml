@@ -12,4 +12,8 @@
     <string name="toast_open_chat_first">Open a WhatsApp chat first</string>
     <string name="toast_no_text_captured">No chat text found — scroll the conversation or try again</string>
     <string name="toast_chat_list_open">Open a conversation (not the chat list)</string>
+    <string name="reply_style_title">Reply style</string>
+    <string name="reply_mode_standard">Standard — balanced replies</string>
+    <string name="reply_mode_brief">Brief — very short lines</string>
+    <string name="reply_mode_professional">Professional — workplace tone</string>
 </resources>

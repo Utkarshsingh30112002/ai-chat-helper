@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.replyassistant.app.databinding.ActivityMainBinding
+import com.replyassistant.app.settings.ReplyMode
 import com.replyassistant.app.settings.SettingsRepository
 
 class MainActivity : AppCompatActivity() {
@@ -32,12 +33,22 @@ class MainActivity : AppCompatActivity() {
         binding.editToken.setText(settings.bearerToken)
         binding.switchUseNotifications.isChecked = settings.useNotifications
         binding.switchUseAccessibility.isChecked = settings.useAccessibility
+        when (settings.replyMode) {
+            ReplyMode.BRIEF -> binding.radioReplyMode.check(R.id.radioModeBrief)
+            ReplyMode.PROFESSIONAL -> binding.radioReplyMode.check(R.id.radioModeProfessional)
+            else -> binding.radioReplyMode.check(R.id.radioModeStandard)
+        }
 
         binding.buttonSave.setOnClickListener {
             settings.baseUrl = binding.editBaseUrl.text?.toString().orEmpty()
             settings.bearerToken = binding.editToken.text?.toString().orEmpty()
             settings.useNotifications = binding.switchUseNotifications.isChecked
             settings.useAccessibility = binding.switchUseAccessibility.isChecked
+            settings.replyMode = when (binding.radioReplyMode.checkedRadioButtonId) {
+                R.id.radioModeBrief -> ReplyMode.BRIEF
+                R.id.radioModeProfessional -> ReplyMode.PROFESSIONAL
+                else -> ReplyMode.STANDARD
+            }
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
             updateStatus()
         }
@@ -100,6 +111,13 @@ class MainActivity : AppCompatActivity() {
         }
         parts += "Auto-suggest from notifications: ${if (settings.useNotifications) "on" else "off (use FAB in chat)"}"
         parts += "Accessibility + FAB: ${if (settings.useAccessibility) "on" else "off"}"
+        parts += "Reply style: ${replyModeSummary(settings.replyMode)}"
         binding.textStatus.text = parts.joinToString("\n")
+    }
+
+    private fun replyModeSummary(mode: String): String = when (mode) {
+        ReplyMode.BRIEF -> getString(R.string.reply_mode_brief)
+        ReplyMode.PROFESSIONAL -> getString(R.string.reply_mode_professional)
+        else -> getString(R.string.reply_mode_standard)
     }
 }

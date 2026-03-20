@@ -21,6 +21,8 @@ export type ReceivedSnapshot = {
   sender?: string;
   locale: string;
   tone: string;
+  /** Client-selected reply mode (system prompt variant) */
+  mode?: string;
 };
 
 export type SentSnapshot = {
@@ -28,9 +30,10 @@ export type SentSnapshot = {
 };
 
 export type AgentSuccessMetrics = {
+  provider: "openai" | "gemini";
   model: string;
-  /** Provider base URL (same as OPENAI_BASE_URL) */
-  openaiBaseUrl: string;
+  /** OpenAI-compatible API base (OpenAI path only) */
+  openaiBaseUrl?: string;
   latencyMs: number;
   temperature: number;
   maxTokens: number;
@@ -72,6 +75,9 @@ function buildReceived(r: ReceivedSnapshot): Record<string, unknown> {
     locale: r.locale,
     tone: r.tone,
   };
+  if (r.mode !== undefined) {
+    out.mode = r.mode;
+  }
   if (r.sender) {
     out.sender = r.sender;
   }
@@ -99,8 +105,11 @@ export async function appendAgentSuccessLog(
       received: buildReceived(input.received),
       sent: { suggestions: input.sent.suggestions },
       agent: {
+        provider: input.agent.provider,
         model: input.agent.model,
-        openaiBaseUrl: input.agent.openaiBaseUrl,
+        ...(input.agent.openaiBaseUrl != null && input.agent.openaiBaseUrl !== ""
+          ? { openaiBaseUrl: input.agent.openaiBaseUrl }
+          : {}),
         latencyMs: input.agent.latencyMs,
         temperature: input.agent.temperature,
         maxTokens: input.agent.maxTokens,

@@ -31,6 +31,13 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(KEY_USE_ACCESSIBILITY, value).apply()
         }
 
+    /** Backend system-prompt variant: [ReplyMode.STANDARD], [ReplyMode.BRIEF], [ReplyMode.PROFESSIONAL]. */
+    var replyMode: String
+        get() = ReplyMode.coerce(prefs.getString(KEY_REPLY_MODE, ReplyMode.STANDARD))
+        set(value) {
+            prefs.edit().putString(KEY_REPLY_MODE, ReplyMode.coerce(value)).apply()
+        }
+
     fun isConfigured(): Boolean =
         baseUrl.isNotBlank() && bearerToken.isNotBlank()
 
@@ -40,5 +47,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_TOKEN = "token"
         private const val KEY_USE_NOTIFICATIONS = "use_notifications"
         private const val KEY_USE_ACCESSIBILITY = "use_accessibility"
+        private const val KEY_REPLY_MODE = "reply_mode"
     }
 }

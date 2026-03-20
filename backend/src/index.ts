@@ -1,11 +1,13 @@
 import "dotenv/config";
 import Fastify, { type FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import { appendClientLogLine } from "./clientLogFile.js";
 import {
   appendAgentFailureLog,
   appendAgentSuccessLog,
+  type AgentSuccessMetrics,
   type ReceivedSnapshot,
 } from "./suggestionFileLog.js";
 
@@ -14,6 +16,11 @@ const APP_SECRET = process.env.APP_SECRET ?? "";
 const MODEL = process.env.MODEL ?? "gpt-4o-mini";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
+/** If set, Gemini is used instead of OpenAI for /v1/suggest. */
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim() ?? "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+
+const useGemini = GEMINI_API_KEY.length > 0;
 
 const CHAT_TEMPERATURE = 0.7;
 const CHAT_MAX_TOKENS = 500;
@@ -151,13 +158,47 @@ type SuggestBody = {
   sender?: string;
   locale?: string;
   tone?: "neutral" | "friendly" | "brief";
+  /** System prompt variant from the client (default: standard). */
+  mode?: string;
 };
+
+const SUGGEST_MODES = ["standard", "brief", "professional"] as const;
+type SuggestMode = (typeof SUGGEST_MODES)[number];
+
+function normalizeMode(raw: unknown): SuggestMode {
+  if (typeof raw === "string" && (SUGGEST_MODES as readonly string[]).includes(raw)) {
+    return raw as SuggestMode;
+  }
+  return "standard";
+}
+
+function buildSystemPrompt(locale: string, tone: string, mode: SuggestMode): string {
+  const modeLine: Record<SuggestMode, string> = {
+    standard:
+      "Style — balanced: natural chat length, like a normal reply (not overly long).",
+    brief:
+      "Style — ultra-brief: each suggestion must be one short sentence or line (aim under ~15 words). No filler.",
+    professional:
+      "Style — professional: polite, clear, workplace-appropriate; avoid slang; use emojis only if the conversation already does.",
+  };
+
+  return `You help draft short reply options for a chat app. Return ONLY valid JSON with this exact shape: {"suggestions":["...","...","..."]}
+Rules:
+- Exactly 3 strings in "suggestions".
+- Each reply is concise and natural for the conversation.
+- Tone: ${tone}.
+- Locale / language for replies: ${locale}.
+- ${modeLine[mode]}
+- No harassment, threats, or illegal content. If the message is abusive, suggest calm, boundary-setting replies.
+- Do not include markdown or explanations outside the JSON.`;
+}
 
 function receivedSnapshot(
   message: string,
   sender: string | undefined,
   locale: string,
-  tone: string
+  tone: string,
+  mode: SuggestMode
 ): ReceivedSnapshot {
   return {
     messageLen: message.length,
@@ -165,6 +206,7 @@ function receivedSnapshot(
     sender,
     locale,
     tone,
+    mode,
   };
 }
 
@@ -174,8 +216,10 @@ app.post<{ Body: SuggestBody }>("/v1/suggest", async (request, reply) => {
     return reply.status(auth.status).send({ error: auth.message });
   }
 
-  if (!OPENAI_API_KEY) {
-    return reply.status(500).send({ error: "Server misconfigured: OPENAI_API_KEY not set" });
+  if (!useGemini && !OPENAI_API_KEY) {
+    return reply
+      .status(500)
+      .send({ error: "Server misconfigured: set GEMINI_API_KEY or OPENAI_API_KEY" });
   }
 
   const body = request.body;
@@ -187,67 +231,102 @@ app.post<{ Body: SuggestBody }>("/v1/suggest", async (request, reply) => {
   const sender = body.sender?.trim();
   const locale = body.locale?.trim() || "en";
   const tone = body.tone ?? "neutral";
+  const mode = normalizeMode(body.mode);
 
-  const received = receivedSnapshot(message, sender, locale, tone);
+  const received = receivedSnapshot(message, sender, locale, tone, mode);
 
-  const openai = new OpenAI({
-    apiKey: OPENAI_API_KEY,
-    baseURL: OPENAI_BASE_URL,
-  });
-
-  const system = `You help draft short reply options for a chat app. Return ONLY valid JSON with this exact shape: {"suggestions":["...","...","..."]}
-Rules:
-- Exactly 3 strings in "suggestions".
-- Each reply is concise and natural for the conversation.
-- Tone: ${tone}.
-- Locale / language for replies: ${locale}.
-- No harassment, threats, or illegal content. If the message is abusive, suggest calm, boundary-setting replies.
-- Do not include markdown or explanations outside the JSON.`;
+  const system = buildSystemPrompt(locale, tone, mode);
 
   const userParts = [
     sender ? `Sender/handle (if known): ${sender}` : null,
     `Incoming message to respond to:\n${message}`,
   ].filter(Boolean);
-
-  const baseAgent = {
-    model: MODEL,
-    openaiBaseUrl: OPENAI_BASE_URL,
-    temperature: CHAT_TEMPERATURE,
-    maxTokens: CHAT_MAX_TOKENS,
-  };
+  const userContent = userParts.join("\n\n");
 
   try {
-    const t0 = Date.now();
-    const completion = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userParts.join("\n\n") },
-      ],
-      response_format: { type: "json_object" },
-      temperature: CHAT_TEMPERATURE,
-      max_tokens: CHAT_MAX_TOKENS,
-    });
-    const latencyMs = Date.now() - t0;
+    let raw: string;
+    let baseAgent: AgentSuccessMetrics;
 
-    const usage = completion.usage
-      ? {
-          prompt_tokens: completion.usage.prompt_tokens,
-          completion_tokens: completion.usage.completion_tokens,
-          total_tokens: completion.usage.total_tokens,
-        }
-      : undefined;
-    const finishReason = completion.choices[0]?.finish_reason ?? null;
+    if (useGemini) {
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        systemInstruction: system,
+        generationConfig: {
+          temperature: CHAT_TEMPERATURE,
+          maxOutputTokens: CHAT_MAX_TOKENS,
+          responseMimeType: "application/json",
+        },
+      });
+      const t0 = Date.now();
+      const result = await model.generateContent(userContent);
+      const latencyMs = Date.now() - t0;
+      raw = result.response.text();
+      const um = result.response.usageMetadata;
+      const usage =
+        um != null
+          ? {
+              prompt_tokens: um.promptTokenCount,
+              completion_tokens: um.candidatesTokenCount,
+              total_tokens: um.totalTokenCount,
+            }
+          : undefined;
+      const finishReason = result.response.candidates?.[0]?.finishReason ?? null;
+      baseAgent = {
+        provider: "gemini",
+        model: GEMINI_MODEL,
+        latencyMs,
+        temperature: CHAT_TEMPERATURE,
+        maxTokens: CHAT_MAX_TOKENS,
+        usage,
+        finishReason: finishReason != null ? String(finishReason) : null,
+      };
+    } else {
+      const openai = new OpenAI({
+        apiKey: OPENAI_API_KEY,
+        baseURL: OPENAI_BASE_URL,
+      });
+      const t0 = Date.now();
+      const completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userContent },
+        ],
+        response_format: { type: "json_object" },
+        temperature: CHAT_TEMPERATURE,
+        max_tokens: CHAT_MAX_TOKENS,
+      });
+      const latencyMs = Date.now() - t0;
+      const usage = completion.usage
+        ? {
+            prompt_tokens: completion.usage.prompt_tokens,
+            completion_tokens: completion.usage.completion_tokens,
+            total_tokens: completion.usage.total_tokens,
+          }
+        : undefined;
+      const finishReason = completion.choices[0]?.finish_reason ?? null;
+      raw = completion.choices[0]?.message?.content ?? "";
+      baseAgent = {
+        provider: "openai",
+        model: MODEL,
+        openaiBaseUrl: OPENAI_BASE_URL,
+        latencyMs,
+        temperature: CHAT_TEMPERATURE,
+        maxTokens: CHAT_MAX_TOKENS,
+        usage,
+        finishReason,
+      };
+    }
 
-    const raw = completion.choices[0]?.message?.content;
-    if (!raw) {
+    if (!raw?.trim()) {
       stats.suggestOpenAiErrors++;
       await appendAgentFailureLog(
         {
           received,
           kind: "empty_model",
-          detail: "choices[0].message.content was empty",
-          agent: { ...baseAgent, latencyMs, usage, finishReason },
+          detail: useGemini ? "model response text was empty" : "choices[0].message.content was empty",
+          agent: baseAgent,
         },
         (obj, msg) => app.log.warn(obj, msg)
       );
@@ -265,7 +344,7 @@ Rules:
           kind: "json_parse",
           detail: e instanceof Error ? e.message : String(e),
           rawModelPreview: raw,
-          agent: { ...baseAgent, latencyMs, usage, finishReason },
+          agent: baseAgent,
         },
         (obj, msg) => app.log.warn(obj, msg)
       );
@@ -281,7 +360,7 @@ Rules:
           kind: "bad_shape",
           detail: `suggestions must be array of length 3, got ${Array.isArray(suggestions) ? `length ${suggestions.length}` : typeof suggestions}`,
           rawModelPreview: raw,
-          agent: { ...baseAgent, latencyMs, usage, finishReason },
+          agent: baseAgent,
         },
         (obj, msg) => app.log.warn(obj, msg)
       );
@@ -297,7 +376,7 @@ Rules:
           kind: "empty_strings",
           detail: "one or more suggestion strings empty after trim",
           rawModelPreview: raw,
-          agent: { ...baseAgent, latencyMs, usage, finishReason },
+          agent: baseAgent,
         },
         (obj, msg) => app.log.warn(obj, msg)
       );
@@ -310,6 +389,7 @@ Rules:
         suggestSuccessTotal: stats.suggestSuccess,
         suggestAttempts: stats.suggestAttempts,
         rateLimitedTotal: stats.rateLimited,
+        suggestProvider: useGemini ? "gemini" : "openai",
       },
       "POST /v1/suggest completed"
     );
@@ -318,12 +398,7 @@ Rules:
       {
         received,
         sent: { suggestions: strings },
-        agent: {
-          ...baseAgent,
-          latencyMs,
-          usage,
-          finishReason,
-        },
+        agent: baseAgent,
       },
       (obj, msg) => app.log.warn(obj, msg)
     );
@@ -331,7 +406,7 @@ Rules:
     return { suggestions: strings };
   } catch (err) {
     stats.suggestOpenAiErrors++;
-    app.log.error({ err }, "POST /v1/suggest OpenAI error");
+    app.log.error({ err }, "POST /v1/suggest model error");
     await appendAgentFailureLog(
       {
         received,
