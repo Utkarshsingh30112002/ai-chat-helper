@@ -1,0 +1,10 @@
+backend/node_modules/
+backend/dist/
+backend/.env
+android/.gradle/
+android/.idea/
+# Keep Gradle build dirs out of Git; copy the debug APK to releases/ (see releases/README.md)
+android/**/build/
+android/local.properties
+*.iml
+.DS_Store
