@@ -13,7 +13,8 @@ import kotlinx.coroutines.launch
 
 class WhatsappNotificationListener : NotificationListenerService() {
 
-    private val settings by lazy { SettingsRepository(this) }
+    /** Use applicationContext so prefs match MainActivity; read fresh each call is via property. */
+    private val settings by lazy { SettingsRepository(applicationContext) }
     private val suggestRepo by lazy { SuggestRepository(this) }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {

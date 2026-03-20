@@ -39,6 +39,16 @@ class MainActivity : AppCompatActivity() {
             else -> binding.radioReplyMode.check(R.id.radioModeStandard)
         }
 
+        // Persist immediately — these used to only apply on "Save", so toggles looked broken.
+        binding.switchUseNotifications.setOnCheckedChangeListener { _, checked ->
+            settings.useNotifications = checked
+            updateStatus()
+        }
+        binding.switchUseAccessibility.setOnCheckedChangeListener { _, checked ->
+            settings.useAccessibility = checked
+            updateStatus()
+        }
+
         binding.buttonSave.setOnClickListener {
             settings.baseUrl = binding.editBaseUrl.text?.toString().orEmpty()
             settings.bearerToken = binding.editToken.text?.toString().orEmpty()
