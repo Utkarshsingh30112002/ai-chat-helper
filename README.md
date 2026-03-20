@@ -29,6 +29,8 @@ Personal Android assistant that:
 3. Run on a device: enable **Reply Assistant** in **Notification access**, **Accessibility**, and **Display over other apps** (from the in-app buttons).
 4. Enter your **HTTPS base URL** (no trailing slash) and **Bearer token** (same value as `APP_SECRET` on the server). Save.
 
+More detail: [`android/README.md`](android/README.md).
+
 ### APK in Git
 
 After `./gradlew :app:assembleDebug`, copy `android/app/build/outputs/apk/debug/app-debug.apk` to `releases/app-debug.apk` and commit it. The Gradle `build/` folder stays ignored to avoid huge binary churn.
@@ -40,4 +42,3 @@ After `./gradlew :app:assembleDebug`, copy `android/app/build/outputs/apk/debug/
 ## Legal
 
 WhatsApp does not provide a supported API for this. Use at your own risk and comply with applicable terms and laws.
-# ai-chat-helper
